@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 
-# Indexer v.1.0.2-slv
-# Author: Josh Brunty (josh dot brunty at marshall dot edu)
-# DESCRIPTION: This script generates an .html index  of files within a directory (recursive is OFF by default). Start from current dir or from folder passed as first positional argument. Optionally filter by file types with --filter "*.py". 
+"""
+Indexer v.1.0.1
+Author: Josh Brunty (josh dot brunty at marshall dot edu)
+DESCRIPTION: This script generates an .html index  of files within a directory (recursive is OFF by default). Start from current dir or from folder passed as first positional argument. Optionally filter by file types with --filter "*.py".
+-handle symlinked files and folders: displayed with custom icons
+By default only the current folder is processed.
+Use -r or --recursive to process nested folders.
+"""
 
-# -handle symlinked files and folders: displayed with custom icons
-# By default only the current folder is processed.
-# Use -r or --recursive to process nested folders.
-
-# 2023-06-19 Changes slv: added some stuff and custom index entry to make this more work like apache autoindex
+# Indexer v.1.0.2-slv (2023-06-19)
+# CHANGES:
+# - make output look more like apache autoindex
+# - parse htaccess
+# - added list of files to ignore
+# - added optional custom index entry
+# - moved css and svg to separate files
+# - added files to include in index
+# - adds content from svg, header, footer etc files
+# - added kludge to replace href in subdirs
 
 import argparse
 import datetime
@@ -25,55 +35,57 @@ WORKDIR = os.getcwd()
 DEFAULT_OUTPUT_FILE = 'index.html'
 
 INDEX_IGNORE = [
-    'LINKS', 'CNAME', 'README.md', 'favicon.ico', 'assets', 'index.html', 'robots.txt', 'scripts'
+    'LINKS', 'CNAME', 'README.md', 'favicon.ico', 'assets', 'index.html', 'robots.txt',
+    'Gemfile', 'Gemfile.lock', '404.html', 'about.markdown', 'index.markdown', 'index.md', 'scripts', 'vendor'
 ]
-FILES = [
+
+INCLUDE_FILES = [
          { 'htaccess': f'{WORKDIR}/.htaccess' },
          { 'svg': f'{SCRIPTDIR}/indexer.svg' },
          { 'header': f'{WORKDIR}/_includes/header.html' },
          { 'footer': f'{WORKDIR}/_includes/footer1.html' },
 ]
 
-# add entry(s) to index
+# add one or more entries to index
 CUSTOM_INDEX = [
+    #{ "href: "/some/example/path" }", "icon": "#svg-id", "name": "example-name", "description": "bla bla"},
     { "href": "LINKS", "icon": "#folder-shortcut", "name": "LINKS", "description": "LINKS: other websites with scripts, repos and mirrors"}
 ]
 
-# in top_dir matches SUBDIR, change href's to '../<path>'
+# kludge: if top_dir matches SUBDIR, change href's to '../<path>'
+#         for SUBDIR, search/replace strings in index
 SUBDIR = '/ARCHIVE'
-
-# for FIX_PATH, search/replace strings in index
 SEARCH_REPLACE = [
-        ['="assets/', '="../assets/'], 
+        ['="assets/', '="../assets/'],
         ['README.md', '../README.md'],
         ['favicon.ico', '../favicon.ico']
 ]
 
 
-FILES_CONTENT = FILES_OBJ = {}
-for f in FILES:
+HTACCESS_MAPPING = CONTENT = FILES_OBJ = {}
+if 'CUSTOM_INDEX' not in globals():
+    CUSTOM_INDEX = []
+CONTENT['custom_index'] = CUSTOM_INDEX
+for f in INCLUDE_FILES:
     for name, path in f.items():
         with open(path, 'r', encoding='utf-8', errors='ignore') as FILES_OBJ[path]:
             if name == 'htaccess':
-                FILES_CONTENT['htaccess'] = FILES_OBJ[path].readlines()
+                CONTENT['htaccess'] = FILES_OBJ[path].readlines()
+                for line in CONTENT['htaccess']:
+                    if line.startswith('AddDescription'):
+                        HTACCESS_MAPPING[line.split()[-1]] = ' '.join(line.split()[1:-1])
             else:
-                FILES_CONTENT[name] = FILES_OBJ[path].read()
+                CONTENT[name] = FILES_OBJ[path].read()
 
-HTACCESS_MAP = {}
-for line in FILES_CONTENT['htaccess']:
-    if line.startswith('AddDescription'):
-        HTACCESS_MAP[line.split()[-1]] = ' '.join(line.split()[1:-1])
 
-if 'CUSTOM_INDEX' not in globals():
-    CUSTOM_INDEX = []
-
-def process_dir(top_dir, opts, content, custom_index):
+def process_dir(top_dir, opts, content):
+    """ creates index file for path """
     glob_patt = opts.filter or '*'
 
     path_top_dir: Path
     path_top_dir = Path(top_dir)
     index_file = None
-    
+
     index_path = Path(path_top_dir, opts.output_file)
 
     if opts.verbose:
@@ -89,11 +101,12 @@ def process_dir(top_dir, opts, content, custom_index):
     if SUBDIR in f'{path_top_dir.absolute()}':
         for old, new in SEARCH_REPLACE:
             content['header'] = content['header'].replace(old, new)
-        for i in custom_index:
+        for i in content['custom_index']:
             href = i.get('href')
             if href:
                 i.update(href = f'../{href}')
         go_up = True
+
     index_file.write(content['header'])
     index_file.write(content['svg'])
     index_file.write("""
@@ -126,7 +139,7 @@ def process_dir(top_dir, opts, content, custom_index):
                         <td class="hideable"></td>
                     </tr>
     """)
-    for i in custom_index:
+    for i in content['custom_index']:
         index_file.write("""
                     <tr class="clickable" """f'{"style=display:none;" if len(i) == 0 else ""}'""">
                         <td></td>
@@ -157,7 +170,7 @@ def process_dir(top_dir, opts, content, custom_index):
             continue
 
         if entry.is_dir() and opts.recursive:
-            process_dir(entry, opts, header, custom_index)
+            process_dir(entry, opts, content)
 
         # From Python 3.6, os.access() accepts path-like objects
         if (not entry.is_symlink()) and not os.access(str(entry), os.W_OK):
@@ -206,10 +219,10 @@ def process_dir(top_dir, opts, content, custom_index):
 
         description = "&mdash;"
 
-        if HTACCESS_MAP.get('/'.join(entry.parts[-2:])):
-            description = HTACCESS_MAP.get('/'.join(entry.parts[-2:]))
-        elif HTACCESS_MAP.get(entry.name):
-            description = HTACCESS_MAP.get(entry.name)
+        if HTACCESS_MAPPING.get('/'.join(entry.parts[-2:])):
+            description = HTACCESS_MAPPING.get('/'.join(entry.parts[-2:]))
+        elif HTACCESS_MAPPING.get(entry.name):
+            description = HTACCESS_MAPPING.get(entry.name)
         description = description.lstrip('"').strip('"')
 
         index_file.write(f"""
@@ -251,14 +264,14 @@ UNITS_MAPPING = [
 ]
 
 
-def pretty_size(bytes, units=UNITS_MAPPING):
+def pretty_size(f_bytes, units=UNITS_MAPPING):
     """Human-readable file sizes.
     ripped from https://pypi.python.org/pypi/hurry.filesize/
     """
     for factor, suffix in units:
-        if bytes >= factor:
+        if f_bytes >= factor:
             break
-    amount = int(bytes / factor)
+    amount = int(f_bytes / factor)
 
     if isinstance(suffix, tuple):
         singular, multiple = suffix
@@ -301,4 +314,4 @@ Email josh dot brunty at marshall dot edu for additional help. ''')
                         required=False)
 
     config = parser.parse_args(sys.argv[1:])
-    process_dir(config.top_dir, config, FILES_CONTENT, CUSTOM_INDEX)
+    process_dir(config.top_dir, config, CONTENT)
