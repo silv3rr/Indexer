@@ -35,8 +35,9 @@ WORKDIR = os.getcwd()
 DEFAULT_OUTPUT_FILE = 'index.html'
 
 INDEX_IGNORE = [
-    'LINKS', 'CNAME', 'README.md', 'favicon.ico', 'assets', 'index.html', 'robots.txt',
-    'Gemfile', 'Gemfile.lock', '404.html', 'about.markdown', 'index.markdown', 'index.md', 'scripts', 'vendor'
+    '.git', '.js', '.log', '.swp', 'rescan', 'rescan.txt',
+    'LINKS', 'CNAME', 'README', 'favicon.ico', 'assets', 'index.html', 'robots.txt',
+    'Gemfile', 'Gemfile.lock', '404.html', 'about.markdown', 'index.markdown', 'index.md', 'scripts', 'vendor',
 ]
 
 INCLUDE_FILES = [
@@ -51,11 +52,12 @@ CUSTOM_INDEX = [
     #{ "href: "/some/example/path" }", "icon": "#svg-id", "name": "example-name", "description": "bla bla"},
     { "href": "LINKS", "icon": "#folder-shortcut", "name": "LINKS", "description": "LINKS: other websites with scripts, repos and mirrors"}
 ]
+# if set to False, dont point go-up link to '..' for top index (only subdirs)
+TOPDIR_UP = True
 
-# kludge: if top_dir matches SUBDIR, change href's to '../<path>'
-#         for SUBDIR, search/replace strings in index
-SUBDIR = '/ARCHIVE'
-SEARCH_REPLACE = [
+# kludge: if top_dir matches SUBDIR, change href's to '../<path>' and replace strings in index
+SUBDIRS = [ '/ARCHIVE' ]
+SUBDIR_REPLACE = [
         ['="assets/', '="../assets/'],
         ['README.md', '../README.md'],
         ['favicon.ico', '../favicon.ico']
@@ -98,8 +100,12 @@ def process_dir(top_dir, opts, content):
         return
 
     go_up = False
-    if SUBDIR in f'{path_top_dir.absolute()}':
-        for old, new in SEARCH_REPLACE:
+    if TOPDIR_UP:
+        go_up = True
+    if any(i in f'{path_top_dir.absolute()}' for i in SUBDIRS):
+        for old, new in SUBDIR_REPLACE:
+            if opts.verbose:
+                print(f"Subdir: replacing '{old}' -> '{new}'")
             content['header'] = content['header'].replace(old, new)
         for i in content['custom_index']:
             href = i.get('href')
@@ -107,8 +113,15 @@ def process_dir(top_dir, opts, content):
                 i.update(href = f'../{href}')
         go_up = True
 
-    index_file.write(content['header'])
-    index_file.write(content['svg'])
+    if content['header']:
+        if opts.verbose:
+            print("Adding header")
+        index_file.write(content['header'])
+
+    if content['svg']:
+        if opts.verbose:
+            print("Adding svg")
+        index_file.write(content['svg'])
     index_file.write("""
         <header></header>
         <main>
@@ -139,21 +152,24 @@ def process_dir(top_dir, opts, content):
                         <td class="hideable"></td>
                     </tr>
     """)
-    for i in content['custom_index']:
-        index_file.write("""
-                    <tr class="clickable" """f'{"style=display:none;" if len(i) == 0 else ""}'""">
-                        <td></td>
-                        <td>
-                            <a href=\""""f'{i.get("href")}'"""\">
-                            <svg width="1.5em" height="1em" version="1.1" viewBox="0 0 265 323"><use xlink:href=\""""f'{i.get("icon")}'"""\"></use></svg>
-                            <span class="goup">"""f'{i.get("name")}'"""</span></a>
-                        </td>
-                        <td>"""f'{i.get("description")}'"""</td>
-                        <td>&mdash;</td>
-                        <td class="hideable">&mdash;</td>
-                        <td class="hideable"></td>
-                    </tr>
-    """)
+    if content['custom_index']:
+        for i in content['custom_index']:
+            if opts.verbose:
+                print("Adding custom_index")
+            index_file.write("""
+                        <tr class="clickable" """f'{"style=display:none;" if len(i) == 0 else ""}'""">
+                            <td></td>
+                            <td>
+                                <a href=\""""f'{i.get("href")}'"""\">
+                                <svg width="1.5em" height="1em" version="1.1" viewBox="0 0 265 323"><use xlink:href=\""""f'{i.get("icon")}'"""\"></use></svg>
+                                <span class="goup">"""f'{i.get("name")}'"""</span></a>
+                            </td>
+                            <td>"""f'{i.get("description")}'"""</td>
+                            <td>&mdash;</td>
+                            <td class="hideable">&mdash;</td>
+                            <td class="hideable"></td>
+                        </tr>
+            """)
 
     # sort dirs first
     sorted_entries = sorted(path_top_dir.glob(glob_patt), key=lambda p: (p.is_file(), p.name))
@@ -166,7 +182,9 @@ def process_dir(top_dir, opts, content):
             continue
 
         # don't include entries starting with . or _ or listed in INDEX_IGNORE
-        if entry.name.startswith('.') or entry.name.startswith('_') or entry.name in INDEX_IGNORE:
+        if entry.name.startswith('.') or entry.name.startswith('_') or any(i in entry.name for i in INDEX_IGNORE):
+            if opts.verbose:
+                print(f"Ignoring '{entry.name}'")
             continue
 
         if entry.is_dir() and opts.recursive:
@@ -248,7 +266,10 @@ def process_dir(top_dir, opts, content):
         <footer/>
         </main>
     """)
-    index_file.write(content['footer'])
+    if content['footer']:
+        if opts.verbose:
+            print("Adding footer")
+        index_file.write(content['footer'])
     if index_file:
         index_file.close()
 
