@@ -70,14 +70,18 @@ if 'CUSTOM_INDEX' not in globals():
 CONTENT['custom_index'] = CUSTOM_INDEX
 for f in INCLUDE_FILES:
     for name, path in f.items():
-        with open(path, 'r', encoding='utf-8', errors='ignore') as FILES_OBJ[path]:
-            if name == 'htaccess':
-                CONTENT['htaccess'] = FILES_OBJ[path].readlines()
-                for line in CONTENT['htaccess']:
-                    if line.startswith('AddDescription'):
-                        HTACCESS_MAPPING[line.split()[-1]] = ' '.join(line.split()[1:-1])
-            else:
-                CONTENT[name] = FILES_OBJ[path].read()
+        if os.path.isfile(path):
+            with open(path, 'r', encoding='utf-8', errors='ignore') as FILES_OBJ[path]:
+                if name == 'htaccess':
+                    CONTENT['htaccess'] = FILES_OBJ[path].readlines()
+                    for line in CONTENT['htaccess']:
+                        if line.startswith('AddDescription'):
+                            HTACCESS_MAPPING[line.split()[-1]] = ' '.join(line.split()[1:-1])
+                else:
+                    CONTENT[name] = FILES_OBJ[path].read()
+        else:
+            CONTENT[name] = ''
+            print("Not found:", path)
 
 
 def process_dir(top_dir, opts, content):
@@ -106,7 +110,7 @@ def process_dir(top_dir, opts, content):
         for old, new in SUBDIR_REPLACE:
             if opts.verbose:
                 print(f"Subdir: replacing '{old}' -> '{new}'")
-            content['header'] = content['header'].replace(old, new)
+            content['header'] = content.get('header').replace(old, new)
         for i in content['custom_index']:
             href = i.get('href')
             if href:
@@ -143,7 +147,7 @@ def process_dir(top_dir, opts, content):
                     <tr class="clickable">
                         <td></td>
                         <td>
-                            <a href=\""""f'{".." if go_up else "."}'"""\"><svg width="1.5em" height="1em" version="1.1" viewBox="0 0 24 24"><use xlink:href="#go-up"></use></svg>
+                            <a href=\""""f'{".." if go_up else "."}'"""\"><svg width="1.5em" height="1em" version="1.1" viewBox="0 0 24 24"><use href="#go-up" xlink:href="#go-up"></use></svg>
                             <span class="goup">..</span></a>
                         </td>
                         <td>&mdash;</td>
@@ -161,7 +165,7 @@ def process_dir(top_dir, opts, content):
                             <td></td>
                             <td>
                                 <a href=\""""f'{i.get("href")}'"""\">
-                                <svg width="1.5em" height="1em" version="1.1" viewBox="0 0 265 323"><use xlink:href=\""""f'{i.get("icon")}'"""\"></use></svg>
+                                <svg width="1.5em" height="1em" version="1.1" viewBox="0 0 265 323"><use href=\""""f'{i.get("icon")}'"""\" xlink:href=\""""f'{i.get("icon")}'"""\"></use></svg>
                                 <span class="goup">"""f'{i.get("name")}'"""</span></a>
                             </td>
                             <td>"""f'{i.get("description")}'"""</td>
@@ -228,10 +232,23 @@ def process_dir(top_dir, opts, content):
         elif entry.is_dir() and entry.is_symlink():
             entry_type = 'folder-shortcut'
             print('dir-symlink', entry.absolute())
-
         elif entry.is_file() and entry.is_symlink():
             entry_type = 'file-shortcut'
             print('file-symlink', entry.absolute())
+        elif entry.is_file() and entry.name.endswith('.sh'):
+            entry_type = 'file-sh'
+        elif entry.is_file() and entry.name.endswith('.tcl'):
+            entry_type = 'file-tcl'
+        elif entry.is_file() and entry.name.endswith('.c'):
+            entry_type = 'file-c'
+        elif entry.is_file() and entry.name.endswith('.tar'):
+            entry_type = 'file-archive'
+        elif entry.is_file() and (entry.name.endswith('.tar.gz') or entry.name.endswith('.tgz') or entry.name.endswith('.tar.bz2') or entry.name.endswith('.tar.xz')):
+            entry_type = 'file-archive'
+        elif entry.is_file() and entry.name.endswith('.rar'):
+            entry_type = 'file-archive'
+        elif entry.is_file() and entry.name.endswith('.zip'):
+            entry_type = 'file-archive'
         else:
             entry_type = 'file'
 
@@ -248,7 +265,7 @@ def process_dir(top_dir, opts, content):
                 <td></td>
                 <td>
                     <a href="{quote(entry_path)}">
-                        <svg width="1.5em" height="1em" version="1.1" viewBox="0 0 265 323"><use xlink:href="#{entry_type}"></use></svg>
+                        <svg width="1.5em" height="1em" version="1.1" viewBox="0 0 265 323"><use href="#{entry_type}" xlink:href="#{entry_type}"></use></svg>
                         <span class="name">{entry.name}</span>
                     </a>
                 </td>
